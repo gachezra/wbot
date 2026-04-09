@@ -38,11 +38,8 @@ export interface AppConfigShape {
     requireApprovalAboveRisk: RiskLevel;
   };
   agent: {
-    runtimeProvider: 'local-http' | 'openrouter';
     runtimeUrl: string;
-    openrouterApiKey: string;
-    model: string;
-    systemPrompt: string;
+    runtimeTimeoutMs: number;
     recentContextLimit: number;
   };
 }
@@ -136,19 +133,19 @@ export class AppConfigService {
 
   get agent(): AppConfigShape['agent'] {
     return {
-      runtimeProvider: this.getAgentRuntimeProvider(
-        'AGENT_RUNTIME_PROVIDER',
-        'local-http',
-      ),
-      runtimeUrl: this.getString('AGENT_RUNTIME_URL', 'http://127.0.0.1:8787/run'),
-      openrouterApiKey: this.getString('OPENROUTER_API_KEY', ''),
-      model: this.getString('AGENT_MODEL', 'openai/gpt-4o-mini'),
-      systemPrompt: this.getString(
-        'AGENT_SYSTEM_PROMPT',
-        'You are a helpful WhatsApp assistant. Be concise and friendly. Reply in the same language the user writes in.',
-      ),
+      runtimeUrl: this.getRequiredString('AGENT_RUNTIME_URL'),
+      runtimeTimeoutMs: this.getNumber('AGENT_RUNTIME_TIMEOUT_MS', 15_000),
       recentContextLimit: this.getNumber('AGENT_RECENT_CONTEXT_LIMIT', 20),
     };
+  }
+
+  private getRequiredString(key: string): string {
+    const value = this.configService.get<string>(key)?.trim();
+    if (!value) {
+      throw new Error(`Missing required environment variable: ${key}`);
+    }
+
+    return value;
   }
 
   private getString(key: string, fallback: string): string {
@@ -184,18 +181,6 @@ export class AppConfigService {
       rawValue === 'high' ||
       rawValue === 'critical'
     ) {
-      return rawValue;
-    }
-
-    return fallback;
-  }
-
-  private getAgentRuntimeProvider(
-    key: string,
-    fallback: AppConfigShape['agent']['runtimeProvider'],
-  ): AppConfigShape['agent']['runtimeProvider'] {
-    const rawValue = this.configService.get<string>(key);
-    if (rawValue === 'local-http' || rawValue === 'openrouter') {
       return rawValue;
     }
 

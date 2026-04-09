@@ -46,6 +46,13 @@ export interface AgentRunOutput {
   confidence: number;
 }
 
+export interface SendResult {
+  ok: boolean;
+  providerMessageId?: string;
+  statusCode?: number;
+  error?: string;
+}
+
 export interface WhatsAppNormalizedEvent {
   eventId: string;
   messageId?: string;

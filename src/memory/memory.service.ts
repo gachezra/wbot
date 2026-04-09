@@ -77,6 +77,20 @@ export class MemoryService implements OnModuleInit {
     await writeFile(this.summaryPath(conversationKey), JSON.stringify(record, null, 2), 'utf8');
   }
 
+  async updateRollingSummary(
+    conversationKey: string,
+    userText: string | null | undefined,
+    assistantText: string,
+  ): Promise<void> {
+    const nextSummary = [
+      `Last user intent: ${this.summarizeText(userText)}`,
+      `Last assistant reply: ${this.summarizeText(assistantText)}`,
+      'Unresolved follow-up: none recorded',
+    ].join('\n');
+
+    await this.writeSummary(conversationKey, nextSummary);
+  }
+
   /** Read the persisted summary for a conversation, or null. */
   async readSummary(conversationKey: string): Promise<string | null> {
     try {
@@ -105,5 +119,14 @@ export class MemoryService implements OnModuleInit {
 
   private summaryPath(conversationKey: string): string {
     return resolve(this.dataRoot, 'summaries', `${this.safeKey(conversationKey)}.json`);
+  }
+
+  private summarizeText(text: string | null | undefined): string {
+    const value = (text ?? '').trim();
+    if (!value) {
+      return 'No text provided';
+    }
+
+    return value.length > 200 ? `${value.slice(0, 197)}...` : value;
   }
 }

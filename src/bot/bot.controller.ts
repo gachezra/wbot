@@ -16,9 +16,11 @@ import { Response } from 'express';
 import { AgentOrchestratorService } from '../agent/agent-orchestrator.service';
 import { ContextBuilderService } from '../context/context-builder.service';
 import { MemoryService } from '../memory/memory.service';
+import { OutboundIdempotencyService } from '../sender/outbound-idempotency.service';
 import { SenderService } from '../sender/sender.service';
 import { DedupeService } from '../whatsapp/services/dedupe.service';
 import { LockService } from '../whatsapp/services/lock.service';
+import { SessionRegistryService } from '../whatsapp/services/session-registry.service';
 import { WhatsappNormalizerService } from '../whatsapp/services/whatsapp-normalizer.service';
 import { WhatsappSignatureService } from '../whatsapp/services/whatsapp-signature.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
@@ -40,6 +42,8 @@ export class BotController {
     private readonly memory: MemoryService,
     private readonly contextBuilder: ContextBuilderService,
     private readonly orchestrator: AgentOrchestratorService,
+    private readonly outboundIdempotency: OutboundIdempotencyService,
+    private readonly sessionRegistry: SessionRegistryService,
     private readonly sender: SenderService,
   ) {}
 
@@ -123,8 +127,35 @@ export class BotController {
 
       // 9. Send reply and persist outbound
       if (result.shouldReply && result.replyText) {
-        await this.sender.sendText(event.from, result.replyText);
+        const inboundMessageId = event.messageId ?? event.eventId;
+        if (this.outboundIdempotency.hasSuccessfulSend(inboundMessageId)) {
+          this.logger.warn(`Outbound send already recorded for ${inboundMessageId}`);
+          return {
+            status: 'ok',
+            eventId: event.eventId,
+            outcome: 'duplicate_outbound_blocked',
+          };
+        }
+
+        const sendResult = await this.sender.sendText(event.from, result.replyText);
+        await this.outboundIdempotency.recordResult({
+          inboundMessageId,
+          conversationKey,
+          sent: sendResult.ok,
+          outboundProviderMessageId: sendResult.providerMessageId,
+        });
+
+        if (!sendResult.ok) {
+          return { status: 'ok', eventId: event.eventId, outcome: 'send_failed' };
+        }
+
         await this.memory.writeOutbound(conversationKey, result.replyText);
+        await this.memory.updateRollingSummary(
+          conversationKey,
+          event.text ?? null,
+          result.replyText,
+        );
+        this.sessionRegistry.noteSummaryUpdated(conversationKey);
       }
 
       return { status: 'ok', eventId: event.eventId, outcome: result.action };

@@ -1,15 +1,34 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { mkdir, readFile, writeFile } from 'fs/promises';
+import { resolve } from 'path';
 
 import { AppConfigService } from '../../shared/app-config.service';
 import { ConversationSessionState, WhatsAppNormalizedEvent } from '../types';
 
 @Injectable()
-export class SessionRegistryService {
+export class SessionRegistryService implements OnModuleInit {
   private readonly logger = new Logger(SessionRegistryService.name);
   private readonly sessions = new Map<string, ConversationSessionState>();
+  private readonly filePath = resolve(process.cwd(), 'data', 'sessions', 'registry.json');
 
   constructor(private readonly appConfig: AppConfigService) {}
+
+  async onModuleInit(): Promise<void> {
+    await mkdir(resolve(process.cwd(), 'data', 'sessions'), { recursive: true });
+
+    try {
+      const raw = await readFile(this.filePath, 'utf8');
+      const records = JSON.parse(raw) as ConversationSessionState[];
+      for (const record of records) {
+        if (record?.conversationKey) {
+          this.sessions.set(record.conversationKey, record);
+        }
+      }
+    } catch {
+      // First boot or unreadable file; start clean.
+    }
+  }
 
   getWarmSession(conversationKey: string): ConversationSessionState | null {
     const session = this.sessions.get(conversationKey);
@@ -45,6 +64,7 @@ export class SessionRegistryService {
     };
 
     this.sessions.set(conversationKey, session);
+    void this.persist();
     this.logger.log(`Spawned session ${session.sessionId} for ${conversationKey}`);
 
     return session;
@@ -59,6 +79,7 @@ export class SessionRegistryService {
     session.status = 'busy';
     session.lastActivityAt = new Date().toISOString();
     session.expiresAt = this.computeExpiry(session.lastActivityAt);
+    void this.persist();
   }
 
   markSessionActive(sessionId: string, agentSessionId?: string): void {
@@ -77,6 +98,7 @@ export class SessionRegistryService {
     if (agentSessionId) {
       session.agentSessionId = agentSessionId;
     }
+    void this.persist();
   }
 
   markSessionFailed(sessionId: string): void {
@@ -92,6 +114,17 @@ export class SessionRegistryService {
     session.health = 'failed';
     session.lastActivityAt = new Date().toISOString();
     session.expiresAt = this.computeExpiry(session.lastActivityAt);
+    void this.persist();
+  }
+
+  noteSummaryUpdated(conversationKey: string): void {
+    const session = this.sessions.get(conversationKey);
+    if (!session) {
+      return;
+    }
+
+    session.lastSummaryAt = new Date().toISOString();
+    void this.persist();
   }
 
   listWarmSessions(): ConversationSessionState[] {
@@ -106,6 +139,7 @@ export class SessionRegistryService {
 
       session.status = 'expired';
       this.sessions.delete(conversationKey);
+      void this.persist();
       this.logger.log(`Expired session ${sessionId} for ${conversationKey}`);
     }
   }
@@ -127,5 +161,9 @@ export class SessionRegistryService {
   private computeExpiry(fromIso: string): string {
     const idleTimeoutMs = this.appConfig.sessions.idleTimeoutSeconds * 1000;
     return new Date(new Date(fromIso).getTime() + idleTimeoutMs).toISOString();
+  }
+
+  private async persist(): Promise<void> {
+    await writeFile(this.filePath, JSON.stringify([...this.sessions.values()], null, 2), 'utf8');
   }
 }
