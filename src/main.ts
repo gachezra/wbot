@@ -2,80 +2,41 @@ import 'reflect-metadata';
 
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { json, Request, Response } from 'express';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import { AppModule } from './app.module';
 import { AppConfigService } from './shared/app-config.service';
-import { WhatsappService } from './whatsapp/whatsapp.service';
-import { WhatsappSignatureService } from './whatsapp/services/whatsapp-signature.service';
-import { RawBodyRequest } from './whatsapp/types';
 
 async function bootstrap(): Promise<void> {
+  // rawBody: true tells NestJS to parse JSON *and* capture req.rawBody on every request.
+  // Do NOT add a second json() middleware — it prevents rawBody from being populated.
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
   });
 
   const config = app.get(AppConfigService);
-  const whatsappService = app.get(WhatsappService);
-  const signatureService = app.get(WhatsappSignatureService);
   const port = config.port;
   const webhookPath = `/api${config.whatsapp.webhookPath}`;
 
   app.setGlobalPrefix('api');
-  app.use(
-    webhookPath,
-    json({
-      limit: config.whatsapp.maxPayloadBytes,
-      verify: (request: RawBodyRequest, _response, buffer) => {
-        request.rawBody = Buffer.from(buffer);
-      },
-    }),
-  );
 
-  const httpAdapter = app.getHttpAdapter().getInstance();
-
-  httpAdapter.get(webhookPath, (request: Request, response: Response) => {
-    try {
-      const challenge = whatsappService.verifyWebhookHandshake(request.query);
-      response.status(200).send(challenge);
-    } catch (error) {
-      response.status(400).json({
-        statusCode: 400,
-        message: error instanceof Error ? error.message : 'Webhook verification failed',
-      });
-    }
-  });
-
-  httpAdapter.post(
-    webhookPath,
-    (request: RawBodyRequest, response: Response) => {
-      try {
-        signatureService.verifySignature(
-          request.headers['x-hub-signature-256'] as string | undefined,
-          request.rawBody,
-        );
-        response.status(200).json(whatsappService.processWebhook(request.body));
-      } catch (error) {
-        const statusCode =
-          typeof error === 'object' &&
-          error !== null &&
-          'status' in error &&
-          typeof error.status === 'number'
-            ? error.status
-            : 400;
-
-        response.status(statusCode).json({
-          statusCode,
-          message: error instanceof Error ? error.message : 'Webhook intake failed',
-        });
-      }
-    },
-  );
+  // Swagger
+  const swaggerOptions = new DocumentBuilder()
+    .setTitle('wbot API')
+    .setDescription('WhatsApp Webhook Listener')
+    .setVersion('0.1.0')
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerOptions);
+  SwaggerModule.setup('api/docs', app, document);
 
   await app.listen(port);
 
   Logger.log(
     `Webhook listener ready on http://localhost:${port}${webhookPath}`,
+    'Bootstrap',
+  );
+  Logger.log(
+    `Swagger UI available at http://localhost:${port}/api/docs`,
     'Bootstrap',
   );
 }

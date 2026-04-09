@@ -9,6 +9,7 @@ export interface AppConfigShape {
     provider: string;
     verifyToken: string;
     appSecret: string;
+    accessToken: string;
     phoneNumberId: string;
     webhookPath: string;
     dedupeWindowSeconds: number;
@@ -51,6 +52,7 @@ export class AppConfigService {
       provider: this.getString('WHATSAPP_PROVIDER', 'meta-cloud-api'),
       verifyToken: this.getString('WHATSAPP_VERIFY_TOKEN', 'change-me'),
       appSecret: this.getString('WHATSAPP_APP_SECRET', 'change-me'),
+      accessToken: this.getString('WHATSAPP_ACCESS_TOKEN', ''),
       phoneNumberId: this.getString('WHATSAPP_PHONE_NUMBER_ID', ''),
       webhookPath: this.normalizeWebhookPath(
         this.getString('WHATSAPP_WEBHOOK_PATH', '/webhooks/whatsapp'),

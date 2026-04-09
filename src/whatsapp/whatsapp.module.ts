@@ -18,5 +18,6 @@ import { IdleReaperService } from './services/idle-reaper.service';
     WhatsappService,
     WhatsappSignatureService,
   ],
+  exports: [WhatsappService, WhatsappSignatureService, WhatsappNormalizerService],
 })
 export class WhatsappModule {}
