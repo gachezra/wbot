@@ -37,6 +37,12 @@ export interface AppConfigShape {
     allowThirdPartyWrites: boolean;
     requireApprovalAboveRisk: RiskLevel;
   };
+  agent: {
+    openrouterApiKey: string;
+    model: string;
+    systemPrompt: string;
+    recentContextLimit: number;
+  };
 }
 
 @Injectable()
@@ -123,6 +129,18 @@ export class AppConfigService {
         'ACTIONING_REQUIRE_APPROVAL_ABOVE_RISK',
         'medium',
       ),
+    };
+  }
+
+  get agent(): AppConfigShape['agent'] {
+    return {
+      openrouterApiKey: this.getString('OPENROUTER_API_KEY', ''),
+      model: this.getString('AGENT_MODEL', 'openai/gpt-4o-mini'),
+      systemPrompt: this.getString(
+        'AGENT_SYSTEM_PROMPT',
+        'You are a helpful WhatsApp assistant. Be concise and friendly. Reply in the same language the user writes in.',
+      ),
+      recentContextLimit: this.getNumber('AGENT_RECENT_CONTEXT_LIMIT', 20),
     };
   }
 

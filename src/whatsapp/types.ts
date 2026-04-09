@@ -4,6 +4,35 @@ export interface RawBodyRequest extends Request {
   rawBody?: Buffer;
 }
 
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+export interface MemoryEntry {
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: string;
+  messageId: string;
+  messageType: string;
+}
+
+// ── Context ───────────────────────────────────────────────────────────────────
+
+export interface ContextPacket {
+  conversationKey: string;
+  recentMessages: MemoryEntry[];
+  summary: string | null;
+  currentText: string | null;
+  currentMessageType: string;
+}
+
+// ── Agent ─────────────────────────────────────────────────────────────────────
+
+export interface OrchestratorResult {
+  shouldReply: boolean;
+  replyText: string;
+  action: 'reply' | 'ignore' | 'escalate';
+  confidence: number;
+}
+
 export interface WhatsAppNormalizedEvent {
   eventId: string;
   messageId?: string;

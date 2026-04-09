@@ -1,0 +1,45 @@
+import { Injectable, Logger } from '@nestjs/common';
+
+import { AppConfigService } from '../shared/app-config.service';
+
+@Injectable()
+export class SenderService {
+  private readonly logger = new Logger(SenderService.name);
+  private readonly graphApiVersion = 'v19.0';
+
+  constructor(private readonly appConfig: AppConfigService) {}
+
+  async sendText(to: string, body: string): Promise<void> {
+    const { phoneNumberId, accessToken } = this.appConfig.whatsapp;
+    const url = `https://graph.facebook.com/${this.graphApiVersion}/${phoneNumberId}/messages`;
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      to,
+      type: 'text',
+      text: { body },
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        this.logger.error(`Send failed to ${to}: HTTP ${response.status} — ${errorBody}`);
+      } else {
+        this.logger.log(`Sent to ${to}: "${body.slice(0, 60)}${body.length > 60 ? '…' : ''}"`);
+      }
+    } catch (err) {
+      this.logger.error(
+        `Network error sending to ${to}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+}

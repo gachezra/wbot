@@ -1,9 +1,9 @@
 import {
-  BadRequestException,
   Controller,
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Post,
   Query,
   Req,
@@ -13,20 +13,34 @@ import {
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 
-import { WhatsappService } from '../whatsapp/whatsapp.service';
-import { WhatsappSignatureService } from '../whatsapp/services/whatsapp-signature.service';
+import { AgentOrchestratorService } from '../agent/agent-orchestrator.service';
+import { ContextBuilderService } from '../context/context-builder.service';
+import { MemoryService } from '../memory/memory.service';
+import { SenderService } from '../sender/sender.service';
+import { DedupeService } from '../whatsapp/services/dedupe.service';
+import { LockService } from '../whatsapp/services/lock.service';
 import { WhatsappNormalizerService } from '../whatsapp/services/whatsapp-normalizer.service';
+import { WhatsappSignatureService } from '../whatsapp/services/whatsapp-signature.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { RawBodyRequest } from '../whatsapp/types';
 import { BotService } from './bot.service';
 
 @ApiTags('Webhook')
 @Controller('webhooks/whatsapp')
 export class BotController {
+  private readonly logger = new Logger(BotController.name);
+
   constructor(
     private readonly whatsappService: WhatsappService,
     private readonly signatureService: WhatsappSignatureService,
     private readonly normalizer: WhatsappNormalizerService,
+    private readonly dedupeService: DedupeService,
+    private readonly lockService: LockService,
     private readonly botService: BotService,
+    private readonly memory: MemoryService,
+    private readonly contextBuilder: ContextBuilderService,
+    private readonly orchestrator: AgentOrchestratorService,
+    private readonly sender: SenderService,
   ) {}
 
   /**
@@ -43,7 +57,6 @@ export class BotController {
   ): void {
     try {
       const challenge = this.whatsappService.verifyWebhookHandshake(query);
-      // Must send plain text, not JSON — that's why we use @Res() here
       res.status(200).send(challenge);
     } catch {
       res.status(400).json({ statusCode: 400, message: 'Webhook verification failed' });
@@ -52,13 +65,21 @@ export class BotController {
 
   /**
    * Meta delivers all inbound messages and status updates here.
+   *
+   * Flow:
+   *   verify signature → normalise → log → [status: ignore]
+   *   → dedupe → lock → write inbound → build context
+   *   → orchestrate → send reply → write outbound → release lock
    */
   @Post()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Receive WhatsApp message events' })
   @ApiResponse({ status: 200, description: 'Event accepted' })
   @ApiResponse({ status: 401, description: 'Invalid signature' })
-  async handleWebhook(@Req() req: RawBodyRequest): Promise<{ status: string; eventId: string }> {
+  async handleWebhook(
+    @Req() req: RawBodyRequest,
+  ): Promise<{ status: string; eventId: string; outcome?: string }> {
+    // 1. Signature verification
     try {
       this.signatureService.verifySignature(
         req.headers['x-hub-signature-256'] as string | undefined,
@@ -68,13 +89,48 @@ export class BotController {
       throw new UnauthorizedException('Invalid WhatsApp signature');
     }
 
+    // 2. Normalise raw payload into a flat event
     const event = this.normalizer.normalize(req.body as Record<string, unknown>);
     this.botService.logStructuredEvent(event);
 
-    if (event.eventType === 'message' && event.from !== 'unknown') {
-      await this.botService.sendWelcomeMessage(event.from);
+    // 3. Ignore non-actionable events (status updates, unknown)
+    if (event.eventType !== 'message' || event.from === 'unknown') {
+      return { status: 'ok', eventId: event.eventId, outcome: 'ignored' };
     }
 
-    return { status: 'ok', eventId: event.eventId };
+    // 4. Dedupe — Meta retries are real
+    if (this.dedupeService.isDuplicate(event.messageId ?? event.eventId)) {
+      this.logger.warn(`Duplicate event ${event.eventId} — skipping`);
+      return { status: 'ok', eventId: event.eventId, outcome: 'duplicate' };
+    }
+
+    // 5. Per-conversation lock — prevents overlapping agent runs
+    const conversationKey = this.normalizer.deriveConversationKey(event);
+    if (!this.lockService.acquire(conversationKey)) {
+      this.logger.warn(`Conversation ${conversationKey} busy — skipping`);
+      return { status: 'ok', eventId: event.eventId, outcome: 'busy' };
+    }
+
+    try {
+      // 6. Persist inbound message to memory
+      await this.memory.writeInbound(conversationKey, event);
+
+      // 7. Build conversation context (recent history + summary)
+      const context = await this.contextBuilder.build(conversationKey, event);
+
+      // 8. Orchestrate — call LLM or fallback
+      const result = await this.orchestrator.handle({ conversationKey, context });
+
+      // 9. Send reply and persist outbound
+      if (result.shouldReply && result.replyText) {
+        await this.sender.sendText(event.from, result.replyText);
+        await this.memory.writeOutbound(conversationKey, result.replyText);
+      }
+
+      return { status: 'ok', eventId: event.eventId, outcome: result.action };
+    } finally {
+      // Always release the lock — even if something above threw
+      this.lockService.release(conversationKey);
+    }
   }
 }
