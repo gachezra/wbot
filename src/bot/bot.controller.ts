@@ -119,7 +119,7 @@ export class BotController {
       const context = await this.contextBuilder.build(conversationKey, event);
 
       // 8. Orchestrate — call LLM or fallback
-      const result = await this.orchestrator.handle({ conversationKey, context });
+      const result = await this.orchestrator.handle({ conversationKey, event, context });
 
       // 9. Send reply and persist outbound
       if (result.shouldReply && result.replyText) {

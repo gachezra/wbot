@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { DedupeService } from './services/dedupe.service';
 import { LockService } from './services/lock.service';
+import { SessionRegistryService } from './services/session-registry.service';
 import { SessionManagerService } from './services/session-manager.service';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappSignatureService } from './services/whatsapp-signature.service';
@@ -13,6 +14,7 @@ import { IdleReaperService } from './services/idle-reaper.service';
     DedupeService,
     IdleReaperService,
     LockService,
+    SessionRegistryService,
     SessionManagerService,
     WhatsappNormalizerService,
     WhatsappService,
@@ -24,6 +26,8 @@ import { IdleReaperService } from './services/idle-reaper.service';
     WhatsappNormalizerService,
     DedupeService,
     LockService,
+    SessionRegistryService,
+    SessionManagerService,
   ],
 })
 export class WhatsappModule {}

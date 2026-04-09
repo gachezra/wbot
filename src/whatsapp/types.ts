@@ -33,6 +33,19 @@ export interface OrchestratorResult {
   confidence: number;
 }
 
+export interface AgentRunInput {
+  conversationKey: string;
+  event: WhatsAppNormalizedEvent;
+  context: ContextPacket;
+}
+
+export interface AgentRunOutput {
+  shouldReply: boolean;
+  replyText?: string;
+  action: 'reply' | 'ignore' | 'escalate';
+  confidence: number;
+}
+
 export interface WhatsAppNormalizedEvent {
   eventId: string;
   messageId?: string;
@@ -46,8 +59,10 @@ export interface WhatsAppNormalizedEvent {
 export interface ConversationSessionState {
   conversationKey: string;
   sessionId: string;
+  agentSessionId: string;
   status: 'warm' | 'busy' | 'expired' | 'failed';
   lastActivityAt: string;
+  expiresAt: string;
   lastSummaryAt: string;
   unresolvedThreads: string[];
   activeMessageId?: string;
